@@ -1,9 +1,7 @@
 # compiled output
 /dist
 /node_modules
-backup_file.sql
-/uploads
-/extensions
+/build
 
 # Logs
 logs
@@ -13,8 +11,6 @@ pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
-
-full_backup.sql
 
 # OS
 .DS_Store
@@ -39,17 +35,24 @@ full_backup.sql
 !.vscode/launch.json
 !.vscode/extensions.json
 
-*.env
-.production.env
-.development.env
-docker-compose.yaml
-Dockerfile
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
 
-*.drawio
+# temp directory
+.temp
+.tmp
 
-.early.coverage
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
 
-# Sentry Config File
-.sentryclirc
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
-contracts/build
+/generated/prisma
