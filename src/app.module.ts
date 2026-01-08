@@ -8,9 +8,19 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { EventsModule } from './modules/events/events.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
-  imports: [PrismaModule, DevicesModule, ScansModule, VulnerabilitiesModule, ReportsModule, AnalyticsModule, EventsModule],
+  imports: [
+    PrismaModule,
+    AuthModule,
+    DevicesModule,
+    ScansModule,
+    VulnerabilitiesModule,
+    ReportsModule,
+    AnalyticsModule,
+    EventsModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
