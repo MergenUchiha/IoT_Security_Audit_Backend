@@ -1,25 +1,31 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger, BadRequestException } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    logger: ['error', 'warn', 'log', 'debug'],
-  });
+  const app = await NestFactory.create(AppModule);
 
-  const logger = new Logger('Bootstrap');
-
-  // Enable CORS
+  // CRITICAL FIX: CORS Configuration
+  // When using credentials: true, origin CANNOT be '*'
+  // Must specify exact origins
   app.enableCors({
     origin: [
-      'http://localhost:5173',
       'http://localhost:3000',
-      process.env.FRONTEND_URL ?? 'http://localhost:3000',
+      'http://localhost:5173',
+      'http://localhost:5174',
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'Origin',
+      'X-Requested-With',
+    ],
+    exposedHeaders: ['Authorization'],
+    maxAge: 3600,
   });
 
   // Global validation pipe
@@ -31,87 +37,67 @@ async function bootstrap() {
       transformOptions: {
         enableImplicitConversion: true,
       },
-      errorHttpStatusCode: 400,
-      exceptionFactory: (errors) => {
-        const messages = errors.map((error) => ({
-          field: error.property,
-          value: error.value,
-          errors: Object.values(error.constraints || {}),
-        }));
-        
-        logger.error('❌ Validation failed:', JSON.stringify(messages, null, 2));
-        
-        return new BadRequestException({
-          statusCode: 400,
-          message: 'Validation failed',
-          errors: messages,
-        });
-      },
     }),
   );
 
-  // HTTP request logging
-  app.use((req, res, next) => {
-    const start = Date.now();
-    const requestId = Math.random().toString(36).substr(2, 9);
-    
-    logger.log(`🔵 [${requestId}] ${req.method} ${req.url}`);
-    
-    res.on('finish', () => {
-      const duration = Date.now() - start;
-      const statusEmoji = res.statusCode >= 500 ? '🔴' : res.statusCode >= 400 ? '🟡' : '🟢';
-      
-      logger.log(`${statusEmoji} [${requestId}] ${res.statusCode} - ${duration}ms`);
-    });
-    
-    next();
-  });
-
-  // API prefix
+  // Global prefix for API routes
   app.setGlobalPrefix('api');
 
-  // Swagger documentation
+  // Swagger documentation setup
   const config = new DocumentBuilder()
     .setTitle('IoT Security Audit System API')
-    .setDescription(
-      'IoT Device Security Audit and Vulnerability Management Platform powered by NestJS, Prisma & PostgreSQL',
-    )
+    .setDescription('Comprehensive API documentation for IoT device security audit and monitoring system')
     .setVersion('1.0')
-    .addBearerAuth()
-    .addTag('devices', 'Device inventory management')
-    .addTag('scans', 'Security scanning endpoints')
-    .addTag('vulnerabilities', 'CVE vulnerability database')
-    .addTag('reports', 'Report generation')
-    .addTag('analytics', 'Analytics and statistics')
+    .addTag('auth', 'Authentication endpoints')
+    .addTag('devices', 'Device management endpoints')
+    .addTag('scans', 'Security scan endpoints')
+    .addTag('vulnerabilities', 'Vulnerability management endpoints')
+    .addTag('reports', 'Report generation endpoints')
+    .addTag('analytics', 'Analytics and metrics endpoints')
+    .addTag('events', 'Real-time event endpoints')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        name: 'JWT',
+        description: 'Enter JWT token',
+        in: 'header',
+      },
+      'JWT-auth',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  SwaggerModule.setup('api/docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+      tagsSorter: 'alpha',
+      operationsSorter: 'alpha',
+    },
+  });
 
+  // Start server
   const port = process.env.PORT || 3001;
   await app.listen(port);
 
   console.log(`
-  ┌─────────────────────────────────────────────────────────┐
-  │                                                         │
-  │   🛡️  IoT Security Audit System Backend API            │
-  │      Device Security & Vulnerability Management        │
-  │                                                         │
-  │   Server:  http://localhost:${port}                        │
-  │   API:     http://localhost:${port}/api                    │
-  │   Docs:    http://localhost:${port}/api/docs               │
-  │   DB:      PostgreSQL with Prisma ORM                   │
-  │                                                         │
-  │   📡 WebSocket enabled for real-time updates            │
-  │   📝 HTTP Request logging enabled                       │
-  │   ✅ Validation enabled with class-validator            │
-  │                                                         │
-  └─────────────────────────────────────────────────────────┘
+    ╔═══════════════════════════════════════════════════════════════╗
+    ║                                                               ║
+    ║   🚀 IoT Security Audit System - Backend Started             ║
+    ║                                                               ║
+    ║   🌐 Application: http://localhost:${port}                     ║
+    ║   📚 API Docs:    http://localhost:${port}/api/docs            ║
+    ║   🔌 WebSocket:   ws://localhost:${port}                       ║
+    ║                                                               ║
+    ║   Environment: ${process.env.NODE_ENV || 'development'}                                    ║
+    ║   CORS: FIXED - credentials with specific origins            ║
+    ║                                                               ║
+    ╚═══════════════════════════════════════════════════════════════╝
   `);
-
-  logger.log(`🚀 Application running on: http://localhost:${port}`);
-  logger.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
-  logger.log(`✅ Ready to accept requests!`);
 }
 
-bootstrap();
+bootstrap().catch((err) => {
+  console.error('❌ Failed to start application:', err);
+  process.exit(1);
+});
