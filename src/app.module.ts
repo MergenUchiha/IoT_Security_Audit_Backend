@@ -8,6 +8,7 @@ import { VulnerabilitiesModule } from './modules/vulnerabilities/vulnerabilities
 import { ReportsModule } from './modules/reports/reports.module';
 import { EventsModule } from './modules/events/events.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { AuditsModule } from './modules/audits/audits.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 
@@ -24,6 +25,7 @@ import { AuthModule } from './modules/auth/auth.module';
     VulnerabilitiesModule,
     ReportsModule,
     AnalyticsModule,
+    AuditsModule,
     EventsModule,
   ],
   controllers: [AppController],

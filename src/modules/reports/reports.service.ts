@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -31,5 +31,17 @@ export class ReportsService {
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
+  }
+
+  async findOne(id: string) {
+    const report = await this.prisma.report.findUnique({
+      where: { id },
+    });
+
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+
+    return report;
   }
 }

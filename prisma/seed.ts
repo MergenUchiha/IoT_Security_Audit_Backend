@@ -5,6 +5,17 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting database seeding for IoT Security Audit System...');
 
+  // Clean up existing data (order matters due to foreign key constraints)
+  console.log('🧹 Cleaning up existing data...');
+  await prisma.activityLog.deleteMany();
+  await prisma.securityMetrics.deleteMany();
+  await prisma.vulnerabilityTrend.deleteMany();
+  await prisma.networkTraffic.deleteMany();
+  await prisma.deviceVulnerability.deleteMany();
+  await prisma.vulnerability.deleteMany();
+  await prisma.device.deleteMany();
+  console.log('✅ Existing data cleaned up');
+
   // Create Devices
   const device1 = await prisma.device.create({
     data: {

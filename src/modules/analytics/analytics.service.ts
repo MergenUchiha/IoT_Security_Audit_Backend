@@ -6,19 +6,31 @@ export class AnalyticsService {
   constructor(private prisma: PrismaService) {}
 
   async getDashboard() {
-    const devices = await this.prisma.device.findMany();
-    const vulnerabilities = await this.prisma.vulnerability.findMany();
-    const metrics = await this.prisma.securityMetrics.findFirst({
-      orderBy: { timestamp: 'desc' },
-    });
+    try {
+      const [devices, vulnerabilities, metrics] = await Promise.all([
+        this.prisma.device.findMany(),
+        this.prisma.vulnerability.findMany(),
+        this.prisma.securityMetrics.findFirst({
+          orderBy: { timestamp: 'desc' },
+        }),
+      ]);
 
-    return {
-      devicesOnline: devices.filter(d => d.status === 'online').length,
-      totalDevices: devices.length,
-      totalVulnerabilities: vulnerabilities.length,
-      criticalIssues: vulnerabilities.filter(v => v.severity === 'critical').length,
-      metrics: metrics || {},
-    };
+      const devicesOnline = devices.filter(d => d.status === 'online').length;
+      const totalDevices = devices.length;
+      const totalVulnerabilities = vulnerabilities.length;
+      const criticalIssues = vulnerabilities.filter(v => v.severity === 'critical').length;
+
+      return {
+        devicesOnline,
+        totalDevices,
+        totalVulnerabilities,
+        criticalIssues,
+        metrics: metrics || {},
+      };
+    } catch (error) {
+      console.error('Error in getDashboard:', error);
+      throw error;
+    }
   }
 
   async getMetrics() {
@@ -37,7 +49,7 @@ export class AnalyticsService {
 
   async getTrends() {
     return await this.prisma.vulnerabilityTrend.findMany({
-      orderBy: { year: 'desc' },
+      orderBy: [{ year: 'desc' }, { month: 'asc' }],
       take: 12,
     });
   }
