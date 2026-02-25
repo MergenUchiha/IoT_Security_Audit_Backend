@@ -1,0 +1,45 @@
+services:
+  # -------------------- MQTT broker --------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - '1883:1883'
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  # -------------------- Postgres (COMMENTED) --------------------
+  # postgres:
+  #   image: postgres:16
+  #   container_name: iot_postgres
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: iot_audit
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+  # -------------------- API (COMMENTED) --------------------
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #     args:
+  #       NUCLEI_VERSION: "3.2.9"
+  #   container_name: iot_api
+  #   env_file:
+  #     - .env.docker
+  #   ports:
+  #     - "5005:3000"
+  #   depends_on:
+  #     - mosquitto
+  #     - postgres
+  #   restart: unless-stopped
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+    # pgdata:

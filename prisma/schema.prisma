@@ -1,254 +1,239 @@
-// IoT Security Audit System - Prisma Schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
-// Device Status Enum
-enum DeviceStatus {
-  online
-  offline
-  warning
-}
-
-// Risk Level Enum
-enum RiskLevel {
-  critical
-  high
-  medium
-  low
-}
-
-// Vulnerability Status Enum
-enum VulnerabilityStatus {
-  open
-  patched
-  mitigated
-}
-
-// Scan Status Enum
-enum ScanStatus {
-  pending
-  running
-  completed
-  failed
-}
-
-// Device Model
+/**
+ * Устройство в сети: роутер/камера/IoT/unknown.
+ * "Agentless": минимум — IP + каналы логов (syslog/mqtt/http).
+ */
 model Device {
-  id              String        @id @default(uuid())
-  name            String
-  ip              String        @unique
-  type            String        // Camera, IoT Sensor, Access Control, etc.
-  status          DeviceStatus  @default(online)
-  risk            RiskLevel     @default(medium)
-  manufacturer    String
-  firmware        String
-  ports           Int[]
-  services        String[]
-  
-  // Metrics
-  vulnerabilities Int           @default(0)
-  lastScan        DateTime?
-  
-  // Relations
-  scans           Scan[]
-  deviceVulns     DeviceVulnerability[]
-  
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String        @id @default(uuid())
+  name           String
+  ip             String?       // если hostname, можно хранить в отдельном поле
+  hostname       String?
+  type           DeviceType    @default(UNKNOWN)
 
-  @@index([status])
-  @@index([risk])
-  @@map("devices")
+  logSourceType  LogSourceType @default(SYSLOG)
+  // Параметры источника логов (если нужно):
+  // - syslog: { "transport": "udp", "port": 5514 }
+  // - mqtt:   { "brokerUrl": "...", "topic": "device/<id>/logs" }
+  // - http:   { "apiKey": "...optional" }
+  logSourceMeta  Json?
+
+  isActive       Boolean       @default(true)
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  logs           LogEntry[]
+  auditRuns      AuditRun[]
+  surfaceSnaps   SurfaceSnapshot[]
+  alerts         Alert[]
 }
 
-// Vulnerability Model (CVE Database)
-model Vulnerability {
-  id            String                @id // CVE-XXXX-XXXX
-  title         String
-  severity      RiskLevel
-  cvss          Float
-  description   String                @db.Text
-  impact        String                @db.Text
-  solution      String                @db.Text
-  discovered    DateTime
-  
-  // Relations
-  deviceVulns   DeviceVulnerability[]
-  scanFindings  ScanFinding[]
-  
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
+/**
+ * Единица лога.
+ * Для фильтров важны: deviceId + ts + level, а также быстрый поиск по message.
+ */
+model LogEntry {
+  id        String    @id @default(uuid())
+  deviceId  String
+  device    Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
-  @@index([severity])
-  @@map("vulnerabilities")
+  ts        DateTime  @default(now())
+  level     LogLevel  @default(INFO)
+
+  source    LogSourceType
+  app       String?   // syslog tag/program
+  host      String?   // syslog hostname (если отличается от device.hostname)
+  message   String
+  raw       Json?     // сырая структура (например распарсенный syslog)
+
+  // если захочешь хранить часть логов в файлах:
+  filePath  String?   // например: /data/logs/<deviceId>/2026-02-24.log
+  fileOffset Int?     // смещение/строка, опционально
+
+  createdAt DateTime  @default(now())
+
+  @@index([deviceId, ts(sort: Desc)])
+  @@index([deviceId, level, ts(sort: Desc)])
 }
 
-// Device-Vulnerability Relationship (many-to-many with status)
-model DeviceVulnerability {
-  id              String                @id @default(uuid())
-  deviceId        String
-  device          Device                @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  vulnerabilityId String
-  vulnerability   Vulnerability         @relation(fields: [vulnerabilityId], references: [id], onDelete: Cascade)
-  status          VulnerabilityStatus   @default(open)
-  detectedAt      DateTime              @default(now())
-  
-  @@unique([deviceId, vulnerabilityId])
-  @@index([deviceId])
-  @@index([vulnerabilityId])
-  @@map("device_vulnerabilities")
+/**
+ * Запуск аудита (по кнопке/по расписанию) для устройства.
+ * Храним status + конфиг запуска.
+ */
+model AuditRun {
+  id        String       @id @default(uuid())
+  deviceId  String
+  device    Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  status    AuditStatus  @default(PENDING)
+  startedAt DateTime?
+  finishedAt DateTime?
+
+  // какие инструменты запускались и с какими параметрами
+  config    Json?
+  summary   Json?        // агрегированная сводка: кол-во портов/critical/high/...
+
+  findings  AuditFinding[]
+
+  createdAt DateTime     @default(now())
+
+  @@index([deviceId, createdAt(sort: Desc)])
 }
 
-// Scan Model
-model Scan {
-  id          String      @id @default(uuid())
-  deviceId    String
-  device      Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
-  
-  type        String      // full, firmware, network, ports
-  status      ScanStatus  @default(pending)
-  startTime   DateTime    @default(now())
-  endTime     DateTime?
-  duration    Int?        // seconds
-  
-  // Phases progress
-  phases      Json        // Array of scan phases with progress
-  
-  // Results
-  findings    ScanFinding[]
-  
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+/**
+ * Находка аудита (порт/сервис/уязвимость/мисконфиг).
+ * Nmap/Nuclei могут складываться сюда.
+ */
+model AuditFinding {
+  id         String    @id @default(uuid())
+  auditRunId String
+  auditRun   AuditRun  @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
 
-  @@index([deviceId])
-  @@index([status])
-  @@index([startTime])
-  @@map("scans")
+  title      String
+  severity   Severity  @default(INFO)
+
+  // тип находки: "open_port", "service", "cve", "misconfig", ...
+  kind       String
+
+  // нормализованные поля (по желанию)
+  port       Int?
+  protocol   String?   // tcp/udp
+  service    String?
+  cve        String?
+
+  description String?
+  evidence    Json?    // кусок вывода/пруфы
+  remediation String?
+
+  createdAt  DateTime  @default(now())
+
+  @@index([auditRunId, severity])
 }
 
-// Scan Finding (vulnerabilities found in a scan)
-model ScanFinding {
-  id              String        @id @default(uuid())
-  scanId          String
-  scan            Scan          @relation(fields: [scanId], references: [id], onDelete: Cascade)
-  vulnerabilityId String
-  vulnerability   Vulnerability @relation(fields: [vulnerabilityId], references: [id])
-  
-  details         String        @db.Text
-  evidence        Json?         // Screenshots, logs, etc.
-  
-  createdAt       DateTime      @default(now())
-
-  @@index([scanId])
-  @@map("scan_findings")
-}
-
-// Network Traffic Model
-model NetworkTraffic {
-  id            String    @id @default(uuid())
-  timestamp     DateTime  @default(now())
-  
-  // Traffic metrics
-  incoming      Int       @default(0)
-  outgoing      Int       @default(0)
-  suspicious    Int       @default(0)
-  
-  // Period (for aggregation)
-  period        String    // "00:00", "00:05", etc.
-  
-  @@index([timestamp])
-  @@map("network_traffic")
-}
-
-// Security Metrics Model
-model SecurityMetrics {
-  id                  String   @id @default(uuid())
-  timestamp           DateTime @default(now())
-  
-  // Device metrics
-  devicesOnline       Int      @default(0)
-  totalDevices        Int      @default(0)
-  
-  // Vulnerability metrics
-  totalVulnerabilities Int     @default(0)
-  criticalIssues      Int      @default(0)
-  highIssues          Int      @default(0)
-  mediumIssues        Int      @default(0)
-  lowIssues           Int      @default(0)
-  
-  // Scan metrics
-  activeScans         Int      @default(0)
-  completedScans      Int      @default(0)
-  
-  // Compliance scores
-  owaspScore          Float    @default(0)
-  nistScore           Float    @default(0)
-  gdprScore           Float    @default(0)
-  iso27001Score       Float    @default(0)
-  cisScore            Float    @default(0)
-  
-  @@index([timestamp])
-  @@map("security_metrics")
-}
-
-// Vulnerability Trend Model (historical data)
-model VulnerabilityTrend {
+/**
+ * Снимок “поверхности атаки” (для surface-change).
+ * Храним порт+сервис профиль, чтобы сравнивать с прошлым.
+ */
+model SurfaceSnapshot {
   id        String   @id @default(uuid())
-  month     String   // "Jan", "Feb", etc.
-  year      Int
-  
-  critical  Int      @default(0)
-  high      Int      @default(0)
-  medium    Int      @default(0)
-  low       Int      @default(0)
-  
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  // Пример:
+  // { "openPorts":[{"port":80,"proto":"tcp","service":"http","version":"..."}, ...] }
+  profile   Json
+
+  // Можно отмечать “baseline” (эталонный)
+  isBaseline Boolean @default(false)
+
   createdAt DateTime @default(now())
 
-  @@unique([month, year])
-  @@index([year])
-  @@map("vulnerability_trends")
+  @@index([deviceId, createdAt(sort: Desc)])
 }
 
-// Activity Log Model
-model ActivityLog {
-  id          String   @id @default(uuid())
-  type        String   // scan, alert, update, info
-  message     String
-  device      String?
-  severity    String   // critical, high, medium, low, info
-  timestamp   DateTime @default(now())
-  
-  details     Json?
-  
-  @@index([timestamp])
-  @@index([type])
-  @@map("activity_logs")
+/**
+ * Алерты: surface changed, log correlation, audit finding critical, etc.
+ */
+model Alert {
+  id        String     @id @default(uuid())
+  deviceId  String
+  device    Device     @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  type      AlertType
+  severity  Severity   @default(MEDIUM)
+
+  title     String
+  message   String
+  data      Json?      // детали (какие порты изменились, какое правило сработало, и т.п.)
+
+  // привязка к источнику
+  auditRunId String?
+  logEntryId String?
+
+  createdAt DateTime   @default(now())
+  acknowledgedAt DateTime?
+
+  @@index([deviceId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
 }
 
-// Report Model
-model Report {
-  id              String   @id @default(uuid())
-  title           String
-  type            String   // technical, executive, compliance
-  status          String   // draft, final
-  
-  // Content
-  devices         Int      @default(0)
-  vulnerabilities Int      @default(0)
-  findings        Json?
-  recommendations Json?
-  
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+/**
+ * Правила корреляции логов (простые regex + окно времени).
+ * Можно хранить активные правила и считать триггеры.
+ */
+model CorrelationRule {
+  id        String   @id @default(uuid())
+  name      String
+  enabled   Boolean  @default(true)
 
-  @@index([type])
-  @@index([createdAt])
-  @@map("reports")
+  // простая модель:
+  // - matchRegex: "Failed password|invalid user"
+  // - windowSec: 60
+  // - threshold: 10
+  matchRegex String
+  windowSec  Int      @default(60)
+  threshold  Int      @default(10)
+
+  severity  Severity  @default(MEDIUM)
+
+  // опционально: ограничить правила конкретными устройствами/типами
+  deviceTypeFilter DeviceType?
+  deviceIdFilter   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+enum DeviceType {
+  ROUTER
+  CAMERA
+  IOT
+  SERVER
+  UNKNOWN
+}
+
+enum LogSourceType {
+  SYSLOG
+  MQTT
+  HTTP
+}
+
+enum LogLevel {
+  TRACE
+  DEBUG
+  INFO
+  WARN
+  ERROR
+  FATAL
+}
+
+enum AuditStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum AlertType {
+  SURFACE_CHANGED
+  LOG_CORRELATION
+  AUDIT_CRITICAL
+  DEVICE_OFFLINE
+}
+
+enum Severity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
 }

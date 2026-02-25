@@ -1,34 +1,29 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { DevicesModule } from './modules/devices/devices.module';
-import { ScansModule } from './modules/scans/scans.module';
-import { VulnerabilitiesModule } from './modules/vulnerabilities/vulnerabilities.module';
-import { ReportsModule } from './modules/reports/reports.module';
-import { EventsModule } from './modules/events/events.module';
-import { AnalyticsModule } from './modules/analytics/analytics.module';
-import { AuditsModule } from './modules/audits/audits.module';
 import { PrismaModule } from './modules/prisma/prisma.module';
-import { AuthModule } from './modules/auth/auth.module';
+import { DevicesModule } from './modules/devices/devices.module';
+import { LogsModule } from './modules/logs/logs.module';
+import { IngestModule } from './ingest/ingest.module';
+import { AuditModule } from './modules/audit/audit.module';
+import { AlertsModule } from './modules/alerts/alerts.module';
+import { RulesModule } from './modules/rules/rules.module';
+import { DetectionModule } from './modules/detection/detection.module';
+import { SummaryModule } from './modules/summary/summary.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
     }),
     PrismaModule,
-    AuthModule,
     DevicesModule,
-    ScansModule,
-    VulnerabilitiesModule,
-    ReportsModule,
-    AnalyticsModule,
-    AuditsModule,
-    EventsModule,
+    LogsModule,
+    IngestModule,
+    AuditModule,
+    AlertsModule,
+    RulesModule,
+    DetectionModule,
+    SummaryModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}

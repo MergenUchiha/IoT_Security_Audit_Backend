@@ -1,103 +1,41 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import helmet from 'helmet';
+import compression from 'compression';
+import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { cors: true });
 
-  // CRITICAL FIX: CORS Configuration
-  // When using credentials: true, origin CANNOT be '*'
-  // Must specify exact origins
-  app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:5174',
-    ],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'Accept',
-      'Origin',
-      'X-Requested-With',
-    ],
-    exposedHeaders: ['Authorization'],
-    maxAge: 3600,
-  });
-
-  // Global validation pipe
+  app.use(helmet());
+  app.use(compression());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       transform: true,
       forbidNonWhitelisted: true,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
     }),
   );
 
-  // Global prefix for API routes
-  app.setGlobalPrefix('api');
+  const config = app.get(ConfigService);
+  const port = Number(config.get('PORT') ?? 3000);
 
-  // Swagger documentation setup
-  const config = new DocumentBuilder()
-    .setTitle('IoT Security Audit System API')
-    .setDescription('Comprehensive API documentation for IoT device security audit and monitoring system')
-    .setVersion('1.0')
-    .addTag('auth', 'Authentication endpoints')
-    .addTag('devices', 'Device management endpoints')
-    .addTag('scans', 'Security scan endpoints')
-    .addTag('vulnerabilities', 'Vulnerability management endpoints')
-    .addTag('reports', 'Report generation endpoints')
-    .addTag('analytics', 'Analytics and metrics endpoints')
-    .addTag('events', 'Real-time event endpoints')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        name: 'JWT',
-        description: 'Enter JWT token',
-        in: 'header',
-      },
-      'JWT-auth',
-    )
-    .build();
+  const swaggerEnabled = String(config.get('SWAGGER_ENABLED') ?? 'true') === 'true';
+  if (swaggerEnabled) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('IoT Security Audit API')
+      .setDescription('Backend for agentless IoT security audit + realtime logs')
+      .setVersion('0.1.0')
+      .build();
+    const doc = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('docs', app, doc);
+  }
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-      tagsSorter: 'alpha',
-      operationsSorter: 'alpha',
-    },
-  });
-
-  // Start server
-  const port = process.env.PORT || 3001;
   await app.listen(port);
-
-  console.log(`
-    ╔═══════════════════════════════════════════════════════════════╗
-    ║                                                               ║
-    ║   🚀 IoT Security Audit System - Backend Started             ║
-    ║                                                               ║
-    ║   🌐 Application: http://localhost:${port}                     ║
-    ║   📚 API Docs:    http://localhost:${port}/api/docs            ║
-    ║   🔌 WebSocket:   ws://localhost:${port}                       ║
-    ║                                                               ║
-    ║   Environment: ${process.env.NODE_ENV || 'development'}                                    ║
-    ║   CORS: FIXED - credentials with specific origins            ║
-    ║                                                               ║
-    ╚═══════════════════════════════════════════════════════════════╝
-  `);
+  // eslint-disable-next-line no-console
+  console.log(`API listening on http://localhost:${port}`);
 }
 
-bootstrap().catch((err) => {
-  console.error('❌ Failed to start application:', err);
-  process.exit(1);
-});
+bootstrap();
