@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DeviceType, LogSourceType } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateDeviceDto {
   @ApiProperty()
@@ -35,4 +41,10 @@ export class CreateDeviceDto {
   })
   @IsOptional()
   logSourceMeta?: any;
+
+  // ← нужно для фронта (форма отправляет isActive при создании)
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

@@ -3,6 +3,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateDeviceDto } from './dto/create-device.dto';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 
+// Пустая строка "" → undefined (не сохраняем в БД)
+function str(v?: string): string | undefined {
+  return v && v.trim() ? v.trim() : undefined;
+}
+
 @Injectable()
 export class DevicesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -11,11 +16,12 @@ export class DevicesService {
     return this.prisma.device.create({
       data: {
         name: dto.name,
-        ip: dto.ip,
-        hostname: dto.hostname,
+        ip: str(dto.ip),
+        hostname: str(dto.hostname),
         type: dto.type,
         logSourceType: dto.logSourceType,
         logSourceMeta: dto.logSourceMeta,
+        // isActive при создании игнорируем (default = true в схеме)
       },
     });
   }
@@ -38,8 +44,8 @@ export class DevicesService {
       where: { id },
       data: {
         name: dto.name,
-        ip: dto.ip,
-        hostname: dto.hostname,
+        ip: str(dto.ip),
+        hostname: str(dto.hostname),
         type: dto.type,
         logSourceType: dto.logSourceType,
         logSourceMeta: dto.logSourceMeta,

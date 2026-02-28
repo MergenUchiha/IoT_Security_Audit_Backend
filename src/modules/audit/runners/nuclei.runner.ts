@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
+import { Logger } from '@nestjs/common';
 import { Severity } from '@prisma/client';
+
+const logger = new Logger('NucleiRunner');
 
 type NucleiFinding = {
   title: string;
@@ -10,13 +13,70 @@ type NucleiFinding = {
   remediation?: string | null;
 };
 
+const WINDOWS_PATHS = [
+  'C:\\Program Files\\nuclei\\nuclei.exe', // ← твой путь
+  'C:\\Program Files (x86)\\Nmap\\nuclei.exe',
+  'C:\\Program Files\\Nmap\\nuclei.exe',
+  'C:\\nuclei\\nuclei.exe',
+  'C:\\tools\\nuclei.exe',
+  'nuclei.exe',
+  'nuclei',
+];
+
+let cachedBin: string | null = null;
+
+async function getNucleiBin(): Promise<string> {
+  if (cachedBin) return cachedBin;
+  if (process.platform !== 'win32') {
+    cachedBin = 'nuclei';
+    return cachedBin;
+  }
+
+  for (const candidate of WINDOWS_PATHS) {
+    try {
+      await execRaw(candidate, ['-version'], 8_000);
+      logger.log(`nuclei binary: "${candidate}"`);
+      cachedBin = candidate;
+      return cachedBin;
+    } catch (e: any) {
+      if (e?.code !== 'ENOENT') {
+        // файл существует, но -version вернул не 0 — всё равно используем
+        logger.log(`nuclei binary (exists): "${candidate}"`);
+        cachedBin = candidate;
+        return cachedBin;
+      }
+      // ENOENT — не существует, идём дальше
+    }
+  }
+
+  throw new Error(
+    'nuclei.exe not found. Tried:\n' +
+      WINDOWS_PATHS.join('\n') +
+      '\n\nDownload: https://github.com/projectdiscovery/nuclei/releases',
+  );
+}
+
 export async function runNuclei(targetUrl: string, extraArgs?: string) {
-  // nuclei -u <url> -jsonl
-  // extraArgs — очень ограниченно; лучше вообще не использовать, но оставляем для диплома.
-  const args = ['-u', targetUrl, '-jsonl'];
+  let bin: string;
+  try {
+    bin = await getNucleiBin();
+  } catch (e: any) {
+    logger.warn(e.message);
+    return { findings: [], error: e.message };
+  }
+
+  const args = [
+    '-u',
+    targetUrl,
+    '-jsonl',
+    '-no-color',
+    '-timeout',
+    '10',
+    '-retries',
+    '1',
+  ];
 
   if (extraArgs) {
-    // безопасный allowlist токенов (не даём передавать произвольные файлы/команды)
     const allowed = extraArgs
       .split(' ')
       .map((x) => x.trim())
@@ -32,28 +92,52 @@ export async function runNuclei(targetUrl: string, extraArgs?: string) {
             '-rate-limit',
           ].includes(x) || /^[a-zA-Z0-9_,:-]+$/.test(x),
       );
-
     args.push(...allowed);
   }
 
+  logger.log(`Running: "${bin}" ${args.join(' ')}`);
+
   try {
-    const { stdout, stderr, code } = await execWithTimeout(
-      'nuclei',
-      args,
-      180_000,
-    );
-    if (code !== 0) {
+    const { stdout, stderr, code } = await execRaw(bin, args, 600_000);
+
+    // Логируем stderr построчно — там прогресс и ошибки nuclei
+    if (stderr?.trim()) {
+      const lines = stderr.split('\n').filter((l) => l.trim());
+      for (const line of lines.slice(0, 50)) {
+        logger.debug(`[nuclei] ${line}`);
+      }
+      if (lines.length > 50) {
+        logger.debug(`[nuclei] ... +${lines.length - 50} more stderr lines`);
+      }
+    }
+
+    if (code !== 0 && !stdout.trim()) {
+      logger.error(
+        `nuclei code=${code}, empty stdout. stderr: ${stderr.slice(0, 800)}`,
+      );
       return {
         findings: [],
-        error: `nuclei failed (code=${code}): ${stderr.slice(0, 2000)}`,
+        error: `nuclei exited code=${code}. Check logs for details.`,
       };
     }
 
+    const stdoutLines = stdout.split('\n').filter(Boolean).length;
+    logger.log(`nuclei stdout: ${stdoutLines} lines, ${stdout.length} bytes`);
+
     const findings = parseJsonl(stdout);
+    logger.log(`nuclei done: ${findings.length} findings on ${targetUrl}`);
+
+    if (findings.length === 0 && stdoutLines === 0) {
+      logger.warn(
+        `nuclei returned empty output! ` +
+          `Try running manually: "${bin}" -u ${targetUrl} -severity critical,high -no-color`,
+      );
+    }
+
     return { findings, error: null };
   } catch (e: any) {
-    // если nuclei не установлен: ENOENT
     const msg = String(e?.message ?? e);
+    logger.error(`nuclei exception: ${msg}`);
     return { findings: [], error: msg };
   }
 }
@@ -62,25 +146,41 @@ function parseJsonl(out: string): NucleiFinding[] {
   const lines = out
     .split('\n')
     .map((l) => l.trim())
-    .filter(Boolean);
+    .filter((l) => l.startsWith('{'));
+
   const res: NucleiFinding[] = [];
 
   for (const line of lines) {
     try {
       const obj = JSON.parse(line);
       const sev = normalizeSeverity(obj?.info?.severity);
+      const matched = obj?.matched_at ?? obj?.matched ?? null;
+      const templateId = obj?.template_id ?? obj?.template ?? '';
+
       res.push({
-        title: obj?.info?.name ?? 'Nuclei finding',
+        title: obj?.info?.name ?? templateId ?? 'Nuclei finding',
         severity: sev,
         kind: 'nuclei',
-        description: obj?.matched ?? obj?.template ?? null,
-        evidence: obj,
+        description:
+          obj?.info?.description ??
+          (matched ? `Matched: ${matched}` : null) ??
+          templateId ??
+          null,
+        evidence: {
+          templateId,
+          matched,
+          type: obj?.type ?? null,
+          host: obj?.host ?? null,
+          tags: obj?.info?.tags ?? [],
+          reference: obj?.info?.reference ?? [],
+        },
         remediation: obj?.info?.remediation ?? null,
       });
     } catch {
-      // skip broken line
+      // skip non-JSON line
     }
   }
+
   return res;
 }
 
@@ -93,27 +193,28 @@ function normalizeSeverity(s: any): Severity {
   return Severity.INFO;
 }
 
-async function execWithTimeout(cmd: string, args: string[], timeoutMs: number) {
+async function execRaw(cmd: string, args: string[], timeoutMs: number) {
   return new Promise<{ stdout: string; stderr: string; code: number }>(
     (resolve, reject) => {
-      const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(cmd, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+      });
 
       let stdout = '';
       let stderr = '';
 
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
-        reject(new Error(`${cmd} timeout after ${timeoutMs}ms`));
+        reject(new Error(`nuclei timeout after ${timeoutMs / 1000}s`));
       }, timeoutMs);
 
       child.stdout.on('data', (d) => (stdout += d.toString('utf-8')));
       child.stderr.on('data', (d) => (stderr += d.toString('utf-8')));
-
       child.on('error', (err) => {
         clearTimeout(timer);
         reject(err);
       });
-
       child.on('close', (code) => {
         clearTimeout(timer);
         resolve({ stdout, stderr, code: code ?? -1 });

@@ -8,15 +8,18 @@ export class RunAuditDto {
   nmap?: boolean = true;
 
   @ApiPropertyOptional({
-    default: true,
-    description: 'Run Nuclei scan (requires nuclei binary installed)',
+    default: false,
+    description:
+      'Run Nuclei scan (requires nuclei.exe in PATH or C:\\Program Files (x86)\\Nmap\\)',
   })
   @IsOptional()
   @IsBoolean()
-  nuclei?: boolean = true;
+  nuclei?: boolean = false;
 
   @ApiPropertyOptional({
-    description: 'Override target URL for nuclei (e.g. https://1.2.3.4)',
+    description:
+      'Target URL for nuclei. If omitted, guessed from nmap results (http/https by open ports). ' +
+      'Example: http://testphp.vulnweb.com',
   })
   @IsOptional()
   @IsString()
@@ -24,7 +27,7 @@ export class RunAuditDto {
   nucleiTargetUrl?: string;
 
   @ApiPropertyOptional({
-    description: 'Extra nuclei args (very limited; keep safe)',
+    description: 'Extra nuclei args, e.g. "-severity critical,high -tags cve"',
   })
   @IsOptional()
   @IsString()
