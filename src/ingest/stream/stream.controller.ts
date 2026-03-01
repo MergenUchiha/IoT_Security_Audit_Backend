@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Res } from '@nestjs/common';
+import { Controller, Get, Param, Res, Logger } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { StreamService } from './stream.service';
@@ -6,10 +6,14 @@ import { StreamService } from './stream.service';
 @ApiTags('stream')
 @Controller('devices/:deviceId/logs')
 export class StreamController {
+  private readonly logger = new Logger(StreamController.name);
+
   constructor(private readonly stream: StreamService) {}
 
   @Get('stream')
   streamLogs(@Param('deviceId') deviceId: string, @Res() res: Response) {
+    this.logger.log(`[Stream] Client connected for device: ${deviceId}`);
+
     // SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -28,6 +32,7 @@ export class StreamController {
     reqOnClose(res, () => {
       clearInterval(ping);
       unsubscribe();
+      this.logger.log(`[Stream] Client disconnected for device: ${deviceId}`);
     });
   }
 }

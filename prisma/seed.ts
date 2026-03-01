@@ -272,7 +272,7 @@ async function main() {
             : null,
           host: faker.datatype.boolean() ? device.hostname : null,
           message: makeLogMessage(level),
-          ...(rawObj ? { raw: rawObj } : {}),
+          raw: rawObj ? (rawObj as Prisma.InputJsonValue) : undefined,
           filePath: faker.datatype.boolean()
             ? `/data/logs/${device.id}/${ts.toISOString().slice(0, 10)}.log`
             : null,

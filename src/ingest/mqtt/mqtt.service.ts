@@ -1,4 +1,9 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as mqtt from 'mqtt';
 import { LogSourceType } from '@prisma/client';
@@ -19,6 +24,7 @@ type MqttPayload = {
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
   private client?: mqtt.MqttClient;
+  private readonly logger = new Logger(MqttService.name);
 
   constructor(
     private readonly config: ConfigService,
@@ -39,11 +45,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.client.on('connect', () => {
-      // eslint-disable-next-line no-console
-      console.log(`[MQTT] connected: ${url}`);
+      this.logger.log(`[MQTT] connected: ${url}`);
       this.client?.subscribe(topic, { qos: 0 }, (err) => {
-        if (err) console.error('[MQTT] subscribe error', err);
-        else console.log(`[MQTT] subscribed: ${topic}`);
+        if (err) this.logger.error('[MQTT] subscribe error', err);
+        else this.logger.log(`[MQTT] subscribed: ${topic}`);
       });
     });
 
@@ -77,12 +82,17 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
           message: msg,
           raw: payload.raw ?? payload,
         });
-      } catch (e) {
-        console.error('[MQTT] message handler error', e);
+      } catch (e: any) {
+        this.logger.error(
+          `[MQTT] message handler error: ${e.message}`,
+          e.stack,
+        );
       }
     });
 
-    this.client.on('error', (e) => console.error('[MQTT] error', e));
+    this.client.on('error', (e) =>
+      this.logger.error(`[MQTT] error: ${e.message}`, e.stack),
+    );
   }
 
   async onModuleDestroy() {

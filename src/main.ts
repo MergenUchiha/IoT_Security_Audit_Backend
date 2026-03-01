@@ -49,11 +49,16 @@ class AllExceptionsFilter implements ExceptionFilter {
   }
 }
 
+import { StructuredLogger } from './common/logger/structured-logger.service';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     cors: true,
-    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+    bufferLogs: true,
   });
+
+  const logger = new StructuredLogger('NestApplication');
+  app.useLogger(logger);
 
   app.use(helmet());
   app.use(compression());
