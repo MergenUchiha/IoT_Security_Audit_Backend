@@ -3,54 +3,85 @@ import { Logger } from '@nestjs/common';
 
 const logger = new Logger('NmapRunner');
 
-/**
- * На Windows nmap может называться nmap.exe и лежать не в системном PATH.
- * Пробуем несколько вариантов.
- */
 function getNmapBin(): string {
-  if (process.platform === 'win32') {
-    return 'nmap.exe';
-  }
+  if (process.platform === 'win32') return 'nmap.exe';
   return 'nmap';
+}
+
+// Базовые аргументы — пробуем сначала с raw scan, при ошибке fallback на --unprivileged
+function buildArgs(targetHost: string, unprivileged = false): string[] {
+  const base = ['-sV', '-Pn', '--host-timeout', '120s', '-oX', '-'];
+  if (unprivileged) base.splice(0, 0, '--unprivileged');
+  base.push(targetHost);
+  return base;
 }
 
 export async function runNmap(targetHost: string): Promise<string> {
   const bin = getNmapBin();
 
-  // -sV: версии сервисов
-  // -Pn: не полагаться на ping (на localhost ping обычно работает, но для надёжности)
-  // --host-timeout: ограничение времени
-  // -oX -: XML в stdout
-  const args = ['-sV', '-Pn', '--host-timeout', '120s', '-oX', '-', targetHost];
-
-  logger.log(`Executing: ${bin} ${args.join(' ')}`);
+  logger.log(
+    `Executing: ${bin} -sV -Pn --host-timeout 120s -oX - ${targetHost}`,
+  );
 
   try {
-    const { stdout, stderr, code } = await execWithTimeout(bin, args, 140_000);
+    const { stdout, stderr, code } = await execWithTimeout(
+      bin,
+      buildArgs(targetHost, false),
+      140_000,
+    );
 
     if (code !== 0) {
+      // Проверяем специфичную ошибку Windows с сетевым интерфейсом
+      if (
+        stderr.includes('not an ethernet device') ||
+        stderr.includes('--unprivileged')
+      ) {
+        logger.warn(`[nmap] raw scan failed, retrying with --unprivileged...`);
+        return runNmapUnprivileged(bin, targetHost);
+      }
       throw new Error(`nmap failed (code=${code}): ${stderr.slice(0, 4000)}`);
     }
+
     if (!stdout || !stdout.includes('<nmaprun')) {
       throw new Error(
         `nmap returned no XML output. stderr=${stderr.slice(0, 4000)}`,
       );
     }
+
     return stdout;
   } catch (err: any) {
-    // ENOENT = binary not found → пробуем полные пути для Windows
     if (err?.code === 'ENOENT' || String(err?.message).includes('ENOENT')) {
       logger.warn(`"${bin}" not found in PATH, trying known Windows paths...`);
-      return tryWindowsPaths(args);
+      return tryWindowsPaths(targetHost);
     }
     throw err;
   }
 }
 
-/**
- * Пробуем стандартные пути установки nmap на Windows
- */
-async function tryWindowsPaths(args: string[]): Promise<string> {
+async function runNmapUnprivileged(
+  bin: string,
+  targetHost: string,
+): Promise<string> {
+  const args = buildArgs(targetHost, true);
+  logger.log(`Executing: ${bin} ${args.join(' ')}`);
+
+  const { stdout, stderr, code } = await execWithTimeout(bin, args, 140_000);
+
+  if (code !== 0) {
+    throw new Error(
+      `nmap --unprivileged failed (code=${code}): ${stderr.slice(0, 4000)}`,
+    );
+  }
+  if (!stdout || !stdout.includes('<nmaprun')) {
+    throw new Error(
+      `nmap --unprivileged returned no XML. stderr=${stderr.slice(0, 4000)}`,
+    );
+  }
+
+  return stdout;
+}
+
+async function tryWindowsPaths(targetHost: string): Promise<string> {
   const candidates = [
     'C:\\Program Files (x86)\\Nmap\\nmap.exe',
     'C:\\Program Files\\Nmap\\nmap.exe',
@@ -61,27 +92,39 @@ async function tryWindowsPaths(args: string[]): Promise<string> {
   for (const candidate of candidates) {
     try {
       logger.log(`Trying: "${candidate}"`);
-      const { stdout, stderr, code } = await execWithTimeout(
+
+      // Сначала без --unprivileged
+      let result = await execWithTimeout(
         candidate,
-        args,
+        buildArgs(targetHost, false),
         140_000,
       );
 
-      if (code === 0 && stdout && stdout.includes('<nmaprun')) {
-        logger.log(`nmap found at: "${candidate}"`);
-        return stdout;
-      }
-      if (code !== 0) {
-        logger.warn(
-          `"${candidate}" returned code=${code}: ${stderr.slice(0, 500)}`,
+      if (
+        result.code !== 0 &&
+        (result.stderr.includes('not an ethernet device') ||
+          result.stderr.includes('--unprivileged'))
+      ) {
+        logger.warn(`[nmap] retrying with --unprivileged for "${candidate}"`);
+        result = await execWithTimeout(
+          candidate,
+          buildArgs(targetHost, true),
+          140_000,
         );
+      }
+
+      if (
+        result.code === 0 &&
+        result.stdout &&
+        result.stdout.includes('<nmaprun')
+      ) {
+        logger.log(`nmap found at: "${candidate}"`);
+        return result.stdout;
       }
     } catch (e: any) {
       if (e?.code !== 'ENOENT') {
-        // Не ENOENT — реальная ошибка выполнения
         logger.warn(`"${candidate}" error: ${e?.message}`);
       }
-      // ENOENT — просто не существует, идём дальше
     }
   }
 
@@ -97,7 +140,6 @@ async function execWithTimeout(cmd: string, args: string[], timeoutMs: number) {
     (resolve, reject) => {
       const child = spawn(cmd, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        // На Windows shell: false — spawn напрямую, без cmd.exe
         shell: false,
       });
 

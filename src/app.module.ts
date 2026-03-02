@@ -8,13 +8,12 @@ import { AlertsModule } from './modules/alerts/alerts.module';
 import { RulesModule } from './modules/rules/rules.module';
 import { DetectionModule } from './modules/detection/detection.module';
 import { SummaryModule } from './modules/summary/summary.module';
-import { LogsModule } from './logs/logs.module';
+import { SelfLogLogger } from './common/logger/self-log.logger';
+import { LogsModule } from './modules/logs/logs.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-    }),
+    ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     DevicesModule,
     LogsModule,
@@ -25,5 +24,7 @@ import { LogsModule } from './logs/logs.module';
     DetectionModule,
     SummaryModule,
   ],
+  providers: [SelfLogLogger],
+  exports: [SelfLogLogger],
 })
 export class AppModule {}

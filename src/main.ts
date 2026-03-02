@@ -15,41 +15,31 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import { SelfLogLogger } from './common/logger/self-log.logger';
+import { PrismaService } from './modules/prisma/prisma.service';
+import { StreamService } from './ingest/stream/stream.service';
 
-// ─── Global Exception Filter ────────────────────────────────────────────────
 @Catch()
 class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('ExceptionFilter');
-
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const req = ctx.getRequest<Request>();
     const res = ctx.getResponse<Response>();
-
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: unknown = 'Internal server error';
-
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       message = exception.getResponse();
     } else if (exception instanceof Error) {
       message = exception.message;
     }
-
-    // Всегда логируем — видно в терминале бэкенда
     this.logger.error(
       `[${req.method}] ${req.url} → ${status} | body: ${JSON.stringify(req.body)} | error: ${JSON.stringify(message)}`,
     );
-
-    res.status(status).json({
-      statusCode: status,
-      path: req.url,
-      message,
-    });
+    res.status(status).json({ statusCode: status, path: req.url, message });
   }
 }
-
-import { StructuredLogger } from './common/logger/structured-logger.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -57,14 +47,16 @@ async function bootstrap() {
     bufferLogs: true,
   });
 
-  const logger = new StructuredLogger('NestApplication');
-  app.useLogger(logger);
+  const selfLogger = app.get(SelfLogLogger);
+  const config = app.get(ConfigService);
+  const prisma = app.get(PrismaService);
+  const stream = app.get(StreamService);
+  selfLogger.init(config, prisma, stream);
 
   app.use(helmet());
   app.use(compression());
 
   const valLogger = new Logger('ValidationPipe');
-
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -75,20 +67,18 @@ async function bootstrap() {
           (e) =>
             `${e.property}: ${Object.values(e.constraints ?? {}).join(', ')}`,
         );
-        valLogger.warn(`Validation failed → ${messages.join(' | ')}`);
+        valLogger.warn(`Validation failed: ${messages.join(' | ')}`);
         return new BadRequestException(messages);
       },
     }),
   );
 
-  // Глобальный фильтр — должен быть ПОСЛЕ ValidationPipe
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  const config = app.get(ConfigService);
   const port = Number(config.get('PORT') ?? 3000);
-
   const swaggerEnabled =
     String(config.get('SWAGGER_ENABLED') ?? 'true') === 'true';
+
   if (swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('IoT Security Audit API')
@@ -102,8 +92,12 @@ async function bootstrap() {
   }
 
   await app.listen(port);
-  console.log(`✅ API listening on http://localhost:${port}`);
-  console.log(`📖 Swagger: http://localhost:${port}/docs`);
+
+  // Подключаем логгер ПОСЛЕ listen — теперь UI успеет подключиться к SSE
+  app.useLogger(selfLogger);
+
+  console.log(`API listening on http://localhost:${port}`);
+  console.log(`Swagger: http://localhost:${port}/docs`);
 }
 
 bootstrap();
