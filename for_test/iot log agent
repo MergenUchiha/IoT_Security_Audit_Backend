@@ -1,0 +1,223 @@
+# ============================================================
+# IoT Security Audit — Windows Log Agent
+# Читает системные логи Windows (Event Log) и отправляет
+# их на HTTP ingest API бэкенда в реальном времени.
+# ============================================================
+# Использование:
+#   .\iot-log-agent.ps1 -DeviceId "ВАШ_DEVICE_ID" -ApiUrl "http://localhost:5005"
+#   .\iot-log-agent.ps1 -DeviceId "ВАШ_DEVICE_ID" -ApiUrl "http://192.168.1.X:5005"
+# ============================================================
+
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$DeviceId,
+
+    [string]$ApiUrl = "http://localhost:5005",
+
+    # Через какие каналы Event Log смотреть
+    [string[]]$LogNames = @("System", "Application", "Security"),
+
+    # Интервал опроса в секундах
+    [int]$PollIntervalSec = 5,
+
+    # Сколько последних событий брать при первом запуске
+    [int]$InitialEvents = 20
+)
+
+# ─── Маппинг уровней ────────────────────────────────────────────────────────
+function Map-Level([int]$level, [string]$levelName) {
+    switch ($level) {
+        1 { return "FATAL" }   # Critical
+        2 { return "ERROR" }   # Error
+        3 { return "WARN" }    # Warning
+        4 { return "INFO" }    # Information
+        5 { return "DEBUG" }   # Verbose
+        default {
+            if ($levelName -match "Critical")    { return "FATAL" }
+            if ($levelName -match "Error")       { return "ERROR" }
+            if ($levelName -match "Warning")     { return "WARN" }
+            if ($levelName -match "Information") { return "INFO" }
+            return "DEBUG"
+        }
+    }
+}
+
+# ─── Отправка одного лога ────────────────────────────────────────────────────
+function Send-Log([hashtable]$payload) {
+    $url = "$ApiUrl/ingest/$DeviceId/logs"
+    $body = $payload | ConvertTo-Json -Compress
+    try {
+        $response = Invoke-RestMethod -Uri $url -Method Post `
+            -ContentType "application/json" `
+            -Body $body `
+            -TimeoutSec 5 `
+            -ErrorAction Stop
+        return $true
+    } catch {
+        Write-Warning "  [SEND ERROR] $($_.Exception.Message.Split("`n")[0])"
+        return $false
+    }
+}
+
+# ─── Цвета для уровней ──────────────────────────────────────────────────────
+function Write-LevelLog([string]$level, [string]$source, [string]$message) {
+    $color = switch ($level) {
+        "FATAL" { "Red" }
+        "ERROR" { "DarkRed" }
+        "WARN"  { "Yellow" }
+        "INFO"  { "Green" }
+        "DEBUG" { "DarkCyan" }
+        default { "Gray" }
+    }
+    $ts = Get-Date -Format "HH:mm:ss.fff"
+    Write-Host "[$ts] " -NoNewline -ForegroundColor DarkGray
+    Write-Host "$($level.PadRight(5))" -NoNewline -ForegroundColor $color
+    Write-Host " [$source] " -NoNewline -ForegroundColor Cyan
+    Write-Host $message.Substring(0, [Math]::Min(120, $message.Length)) -ForegroundColor White
+}
+
+# ─── Старт ──────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║        IoT Security Audit — Windows Log Agent        ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Device ID  : " -NoNewline -ForegroundColor DarkGray
+Write-Host $DeviceId -ForegroundColor Yellow
+Write-Host "  API URL    : " -NoNewline -ForegroundColor DarkGray
+Write-Host $ApiUrl -ForegroundColor Yellow
+Write-Host "  Logs       : " -NoNewline -ForegroundColor DarkGray
+Write-Host ($LogNames -join ", ") -ForegroundColor Yellow
+Write-Host "  Poll every : " -NoNewline -ForegroundColor DarkGray
+Write-Host "${PollIntervalSec}s" -ForegroundColor Yellow
+Write-Host ""
+
+# Проверяем доступность API
+Write-Host "→ Checking API availability..." -ForegroundColor DarkGray
+try {
+    $check = Invoke-RestMethod -Uri "$ApiUrl/devices/$DeviceId/summary" `
+        -Method Get -TimeoutSec 5 -ErrorAction Stop
+    Write-Host "  ✓ API reachable. Device: $($check.device.name)" -ForegroundColor Green
+} catch {
+    Write-Host "  ✗ API not reachable: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Check that backend is running on $ApiUrl" -ForegroundColor Red
+    Read-Host "Press Enter to continue anyway"
+}
+
+Write-Host ""
+Write-Host "→ Starting log collection. Press Ctrl+C to stop." -ForegroundColor DarkGray
+Write-Host ""
+
+# Словарь: последний TimeCreated по каждому каналу
+$lastSeen = @{}
+$sentCount = 0
+$errorCount = 0
+
+# Первый запуск: берём последние N событий для каждого канала
+foreach ($logName in $LogNames) {
+    try {
+        $events = Get-WinEvent -LogName $logName -MaxEvents $InitialEvents -ErrorAction SilentlyContinue
+        if ($events -and $events.Count -gt 0) {
+            $lastSeen[$logName] = ($events | Sort-Object TimeCreated -Descending | Select-Object -First 1).TimeCreated
+
+            Write-Host "  Channel [$logName]: last event at $($lastSeen[$logName].ToString('HH:mm:ss'))" -ForegroundColor DarkGray
+
+            # Отправляем последние N событий как начальный батч
+            $events = $events | Sort-Object TimeCreated
+            foreach ($ev in $events) {
+                $level    = Map-Level $ev.Level $ev.LevelDisplayName
+                $source   = $ev.ProviderName
+                $message  = $ev.Message
+                if (-not $message) { $message = $ev.FormatDescription() }
+                if (-not $message) { $message = "EventID=$($ev.Id)" }
+                # Обрезаем длинные сообщения
+                if ($message.Length -gt 2000) { $message = $message.Substring(0, 2000) + "..." }
+
+                $payload = @{
+                    message = $message
+                    level   = $level
+                    app     = $source
+                    host    = $env:COMPUTERNAME
+                    source  = "HTTP"
+                    ts      = $ev.TimeCreated.ToUniversalTime().ToString("o")
+                    raw     = @{
+                        eventId  = $ev.Id
+                        channel  = $logName
+                        computer = $ev.MachineName
+                        task     = $ev.TaskDisplayName
+                    }
+                }
+
+                $ok = Send-Log $payload
+                if ($ok) {
+                    $sentCount++
+                    Write-LevelLog $level $source $message
+                } else {
+                    $errorCount++
+                }
+            }
+        } else {
+            $lastSeen[$logName] = (Get-Date).AddSeconds(-$PollIntervalSec)
+        }
+    } catch {
+        Write-Warning "Cannot read log [$logName]: $($_.Exception.Message)"
+        $lastSeen[$logName] = (Get-Date)
+    }
+}
+
+Write-Host ""
+Write-Host "  Initial batch sent: $sentCount events, $errorCount errors" -ForegroundColor DarkGray
+Write-Host ""
+
+# ─── Основной цикл ──────────────────────────────────────────────────────────
+while ($true) {
+    Start-Sleep -Seconds $PollIntervalSec
+
+    foreach ($logName in $LogNames) {
+        try {
+            $after = $lastSeen[$logName]
+            $events = Get-WinEvent -LogName $logName -ErrorAction SilentlyContinue |
+                Where-Object { $_.TimeCreated -gt $after } |
+                Sort-Object TimeCreated
+
+            if (-not $events) { continue }
+
+            foreach ($ev in $events) {
+                $level   = Map-Level $ev.Level $ev.LevelDisplayName
+                $source  = $ev.ProviderName
+                $message = $ev.Message
+                if (-not $message) { $message = $ev.FormatDescription() }
+                if (-not $message) { $message = "EventID=$($ev.Id)" }
+                if ($message.Length -gt 2000) { $message = $message.Substring(0, 2000) + "..." }
+
+                $payload = @{
+                    message = $message
+                    level   = $level
+                    app     = $source
+                    host    = $env:COMPUTERNAME
+                    source  = "HTTP"
+                    ts      = $ev.TimeCreated.ToUniversalTime().ToString("o")
+                    raw     = @{
+                        eventId  = $ev.Id
+                        channel  = $logName
+                        computer = $ev.MachineName
+                        task     = $ev.TaskDisplayName
+                    }
+                }
+
+                $ok = Send-Log $payload
+                if ($ok) {
+                    $sentCount++
+                    Write-LevelLog $level $source $message
+                } else {
+                    $errorCount++
+                }
+
+                $lastSeen[$logName] = $ev.TimeCreated
+            }
+
+        } catch {
+            # Канал недоступен (например Security требует прав) — пропускаем
+        }
+    }
+}
