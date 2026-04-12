@@ -13,26 +13,41 @@ type NucleiFinding = {
   remediation?: string | null;
 };
 
-const WINDOWS_PATHS = [
-  'C:\\Program Files\\nuclei\\nuclei.exe', // ← твой путь
-  'C:\\Program Files (x86)\\Nmap\\nuclei.exe',
-  'C:\\Program Files\\Nmap\\nuclei.exe',
-  'C:\\nuclei\\nuclei.exe',
-  'C:\\tools\\nuclei.exe',
-  'nuclei.exe',
-  'nuclei',
-];
+const FALLBACK_PATHS =
+  process.platform === 'win32'
+    ? [
+        'C:\\Program Files\\nuclei\\nuclei.exe',
+        'C:\\Program Files (x86)\\Nmap\\nuclei.exe',
+        'C:\\Program Files\\Nmap\\nuclei.exe',
+        'C:\\nuclei\\nuclei.exe',
+        'C:\\tools\\nuclei.exe',
+        'nuclei.exe',
+        'nuclei',
+      ]
+    : [
+        '/usr/local/bin/nuclei',
+        '/opt/homebrew/bin/nuclei',
+        '/usr/bin/nuclei',
+        'nuclei',
+      ];
 
 let cachedBin: string | null = null;
 
 async function getNucleiBin(): Promise<string> {
   if (cachedBin) return cachedBin;
-  if (process.platform !== 'win32') {
-    cachedBin = 'nuclei';
+
+  // Сначала пробуем nuclei из PATH
+  const defaultBin = process.platform === 'win32' ? 'nuclei.exe' : 'nuclei';
+  try {
+    await execRaw(defaultBin, ['-version'], 8_000);
+    logger.log(`nuclei binary found in PATH: "${defaultBin}"`);
+    cachedBin = defaultBin;
     return cachedBin;
+  } catch {
+    // не в PATH — пробуем fallback-пути
   }
 
-  for (const candidate of WINDOWS_PATHS) {
+  for (const candidate of FALLBACK_PATHS) {
     try {
       await execRaw(candidate, ['-version'], 8_000);
       logger.log(`nuclei binary: "${candidate}"`);
@@ -40,19 +55,20 @@ async function getNucleiBin(): Promise<string> {
       return cachedBin;
     } catch (e: any) {
       if (e?.code !== 'ENOENT') {
-        // файл существует, но -version вернул не 0 — всё равно используем
         logger.log(`nuclei binary (exists): "${candidate}"`);
         cachedBin = candidate;
         return cachedBin;
       }
-      // ENOENT — не существует, идём дальше
     }
   }
 
+  const hint =
+    process.platform === 'win32'
+      ? 'On Windows: download from https://github.com/projectdiscovery/nuclei/releases'
+      : 'On macOS: brew install nuclei. On Linux: go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest';
+
   throw new Error(
-    'nuclei.exe not found. Tried:\n' +
-      WINDOWS_PATHS.join('\n') +
-      '\n\nDownload: https://github.com/projectdiscovery/nuclei/releases',
+    `nuclei not found. Tried:\n${FALLBACK_PATHS.join('\n')}\n\n${hint}`,
   );
 }
 

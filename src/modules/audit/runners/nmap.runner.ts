@@ -51,8 +51,8 @@ export async function runNmap(targetHost: string): Promise<string> {
     return stdout;
   } catch (err: any) {
     if (err?.code === 'ENOENT' || String(err?.message).includes('ENOENT')) {
-      logger.warn(`"${bin}" not found in PATH, trying known Windows paths...`);
-      return tryWindowsPaths(targetHost);
+      logger.warn(`"${bin}" not found in PATH, trying known fallback paths...`);
+      return tryFallbackPaths(targetHost);
     }
     throw err;
   }
@@ -81,13 +81,21 @@ async function runNmapUnprivileged(
   return stdout;
 }
 
-async function tryWindowsPaths(targetHost: string): Promise<string> {
-  const candidates = [
-    'C:\\Program Files (x86)\\Nmap\\nmap.exe',
-    'C:\\Program Files\\Nmap\\nmap.exe',
-    'C:\\nmap\\nmap.exe',
-    'nmap',
-  ];
+async function tryFallbackPaths(targetHost: string): Promise<string> {
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          'C:\\Program Files (x86)\\Nmap\\nmap.exe',
+          'C:\\Program Files\\Nmap\\nmap.exe',
+          'C:\\nmap\\nmap.exe',
+          'nmap',
+        ]
+      : [
+          '/opt/homebrew/bin/nmap',
+          '/usr/local/bin/nmap',
+          '/usr/bin/nmap',
+          'nmap',
+        ];
 
   for (const candidate of candidates) {
     try {
@@ -128,10 +136,13 @@ async function tryWindowsPaths(targetHost: string): Promise<string> {
     }
   }
 
+  const hint =
+    process.platform === 'win32'
+      ? 'On Windows: install from https://nmap.org/download.html and ensure it is added to PATH.'
+      : 'On macOS: brew install nmap. On Linux: sudo apt install nmap.';
+
   throw new Error(
-    'nmap binary not found. ' +
-      'On Windows: install from https://nmap.org/download.html and ensure it is added to PATH. ' +
-      'After installation, restart the backend server.',
+    `nmap binary not found. ${hint} After installation, restart the backend server.`,
   );
 }
 

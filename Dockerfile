@@ -2,11 +2,17 @@
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+# Install bun
+RUN npm i -g bun
+
+COPY package.json bun.lock ./
+COPY prisma ./prisma
+COPY prisma.config.ts ./
+RUN bun install --frozen-lockfile \
+ && DATABASE_URL="postgresql://fake:fake@localhost:5432/fake" bunx prisma generate
 
 COPY . .
-RUN npm run build
+RUN bun run build
 
 # -------- runtime --------
 FROM node:20-bookworm-slim AS runtime
@@ -26,13 +32,18 @@ RUN curl -fsSL -o /tmp/nuclei.zip \
   && rm -f /tmp/nuclei.zip \
   && chmod +x /usr/local/bin/nuclei
 
-# Install only prod deps
-COPY package*.json ./
-RUN npm ci --omit=dev
+# Install bun
+RUN npm i -g bun
 
-# Copy dist + prisma (schema/migrations if needed at runtime)
+# Install only prod deps + generate prisma client
+COPY package.json bun.lock ./
+COPY prisma ./prisma
+COPY prisma.config.ts ./
+RUN bun install --frozen-lockfile --production \
+ && DATABASE_URL="postgresql://fake:fake@localhost:5432/fake" bunx prisma generate
+
+# Copy dist from builder
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
 
 ENV NODE_ENV=production
 EXPOSE 3000

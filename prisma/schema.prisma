@@ -7,6 +7,18 @@ datasource db {
 }
 
 /**
+ * Пользователь системы (аутентификация).
+ */
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String   // bcrypt hash
+  role      UserRole @default(OPERATOR)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/**
  * Устройство в сети: роутер/камера/IoT/unknown.
  * "Agentless": минимум — IP + каналы логов (syslog/mqtt/http).
  */
@@ -236,4 +248,9 @@ enum Severity {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
 }

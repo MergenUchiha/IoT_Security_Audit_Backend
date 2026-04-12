@@ -54,7 +54,15 @@ async function bootstrap() {
   selfLogger.init(config, prisma, stream);
 
   app.use(helmet());
-  app.use(compression());
+  app.use(
+    compression({
+      filter: (req) => {
+        // Не сжимаем SSE-потоки — compression буферизирует и ломает streaming
+        if (req.url?.includes('/logs/stream')) return false;
+        return compression.filter(req, req.res!);
+      },
+    }),
+  );
 
   const valLogger = new Logger('ValidationPipe');
   app.useGlobalPipes(
@@ -86,6 +94,7 @@ async function bootstrap() {
         'Backend for agentless IoT security audit + realtime logs',
       )
       .setVersion('0.1.0')
+      .addBearerAuth()
       .build();
     const doc = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('docs', app, doc);

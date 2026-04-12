@@ -15,10 +15,18 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 let faker: any;
+let bcrypt: any;
+
 async function ensureFaker() {
   if (!faker) {
     const mod = await import('@faker-js/faker');
     faker = mod.faker;
+  }
+}
+
+async function ensureBcrypt() {
+  if (!bcrypt) {
+    bcrypt = await import('bcryptjs');
   }
 }
 
@@ -153,6 +161,7 @@ function makeLogMessage(level: LogLevel) {
 
 async function main() {
   await ensureFaker();
+  await ensureBcrypt();
 
   await prisma.auditFinding.deleteMany();
   await prisma.logEntry.deleteMany();
@@ -161,6 +170,18 @@ async function main() {
   await prisma.auditRun.deleteMany();
   await prisma.correlationRule.deleteMany();
   await prisma.device.deleteMany();
+  await prisma.user.deleteMany();
+
+  // Default admin user (password: admin123)
+  const adminHash = await bcrypt.hash('admin123', 10);
+  await prisma.user.create({
+    data: {
+      username: 'admin',
+      password: adminHash,
+      role: 'ADMIN',
+    },
+  });
+  console.log('Created default user: admin / admin123');
 
   await prisma.correlationRule.createMany({
     data: [

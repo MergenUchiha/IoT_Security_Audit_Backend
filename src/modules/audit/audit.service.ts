@@ -118,9 +118,16 @@ export class AuditService {
                 title: 'nmap not installed',
                 severity: Severity.INFO,
                 kind: 'tool_missing',
-                description: 'Install nmap: https://nmap.org/download.html',
+                description:
+                  process.platform === 'win32'
+                    ? 'Install nmap: https://nmap.org/download.html'
+                    : process.platform === 'darwin'
+                      ? 'Install nmap: brew install nmap'
+                      : 'Install nmap: sudo apt install nmap',
                 remediation:
-                  'Place nmap.exe in C:\\Program Files (x86)\\Nmap\\',
+                  process.platform === 'win32'
+                    ? 'Place nmap.exe in C:\\Program Files (x86)\\Nmap\\ or add to PATH'
+                    : 'Ensure nmap is available in PATH',
               },
             });
           }
@@ -156,8 +163,11 @@ export class AuditService {
                 severity: Severity.INFO,
                 kind: 'tool_missing',
                 description:
-                  'Download nuclei from https://github.com/projectdiscovery/nuclei/releases ' +
-                  'and place nuclei.exe in C:\\Program Files (x86)\\Nmap\\',
+                  process.platform === 'win32'
+                    ? 'Download nuclei from https://github.com/projectdiscovery/nuclei/releases and place nuclei.exe in PATH'
+                    : process.platform === 'darwin'
+                      ? 'Install nuclei: brew install nuclei'
+                      : 'Install nuclei: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest',
                 remediation:
                   'Install nuclei to enable web vulnerability scanning.',
               },
