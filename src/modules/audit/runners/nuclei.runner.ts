@@ -90,6 +90,8 @@ export async function runNuclei(targetUrl: string, extraArgs?: string) {
     '10',
     '-retries',
     '1',
+    '-system-resolvers',
+    '-ni',
   ];
 
   if (extraArgs) {

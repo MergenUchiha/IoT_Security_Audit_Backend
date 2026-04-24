@@ -38,6 +38,12 @@ model Device {
 
   isActive       Boolean       @default(true)
 
+  // Scheduled audit settings
+  scheduleEnabled Boolean      @default(false)
+  scheduleCron    String?      // cron expression, e.g. "0 3 * * *" = every day at 03:00
+  scheduleEmail   String?      // email to send results to
+  scheduleLastRun DateTime?
+
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
