@@ -53,9 +53,12 @@ docker compose -f docker-compose.prod.yml restart api
 пользователя **admin / admin123**. Запускается прямо внутри контейнера:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec api bun prisma/seed.ts
+docker compose -f docker-compose.prod.yml exec api node dist/seed.cjs
 ```
 
+> Запускается через `node` (не bun — bun пока не умеет нативный
+> `better-sqlite3`). Скомпилированный `dist/seed.cjs` уже лежит в образе.
+>
 > ⚠️ Сид сначала **очищает** таблицы (`deleteMany`), затем наполняет заново —
 > не запускай на проде с реальными данными.
 

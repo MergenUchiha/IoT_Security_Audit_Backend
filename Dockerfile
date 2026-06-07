@@ -12,7 +12,8 @@ RUN bun install --frozen-lockfile \
  && DATABASE_URL="file:/tmp/fake.db" bunx prisma generate
 
 COPY . .
-RUN bun run build
+RUN bun run build \
+ && bun build prisma/seed.ts --target node --format cjs --packages external --outfile dist/seed.cjs
 
 # -------- runtime --------
 FROM node:20-bookworm-slim AS runtime
