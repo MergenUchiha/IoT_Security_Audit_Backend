@@ -49,8 +49,8 @@ docker compose -f docker-compose.prod.yml restart api
 
 ## 6. Проверка
 
-- `http://<IP_СЕРВЕРА>` — фронтенд, зарегистрировать пользователя через UI.
-- `http://<IP_СЕРВЕРА>:5001` — API напрямую (Swagger включён).
+- `http://<IP_СЕРВЕРА>:8090` — фронтенд, зарегистрировать пользователя через UI.
+- `http://<IP_СЕРВЕРА>:5050` — API напрямую (Swagger включён).
 - Логи: `docker compose -f docker-compose.prod.yml logs -f api`
 
 ## 7. Подключение IoT-агентов
@@ -71,13 +71,20 @@ cd backend && docker compose -f docker-compose.prod.yml up -d --build
 
 | Порт | Что |
 |------|-----|
-| 80/tcp | Web UI (+ /api/ прокси) |
-| 5001/tcp | API напрямую (опционально, можно закрыть) |
+| 8090/tcp | Web UI (+ /api/ прокси) |
+| 5050/tcp | API напрямую (опционально, можно закрыть) |
 | 5514/udp | Syslog от устройств |
 | 1883/tcp | MQTT |
 
+Порты публикации можно переопределить переменными окружения
+(`WEB_PORT`, `API_PORT`, `SYSLOG_PORT`), например:
+
 ```bash
-sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 5001/tcp
+WEB_PORT=9000 docker compose -f docker-compose.prod.yml up -d
+```
+
+```bash
+sudo ufw allow 22/tcp && sudo ufw allow 8090/tcp && sudo ufw allow 5050/tcp
 sudo ufw allow 5514/udp && sudo ufw allow 1883/tcp
 sudo ufw enable
 ```

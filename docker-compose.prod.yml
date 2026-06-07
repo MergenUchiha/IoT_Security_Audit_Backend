@@ -30,8 +30,8 @@ services:
     env_file:
       - .env.docker
     ports:
-      - "5001:3000"      # прямой доступ к API (Swagger), можно убрать — есть прокси через nginx
-      - "5514:5514/udp"  # syslog от IoT-устройств
+      - "${API_PORT:-5050}:3000"   # прямой доступ к API (Swagger), можно убрать — есть прокси через nginx
+      - "${SYSLOG_PORT:-5514}:5514/udp"  # syslog от IoT-устройств
     volumes:
       - api_data:/app/data
     depends_on:
@@ -43,7 +43,7 @@ services:
       context: ../frontend
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "${WEB_PORT:-8090}:80"
     depends_on:
       - api
 
