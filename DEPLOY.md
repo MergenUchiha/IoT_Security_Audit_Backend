@@ -70,44 +70,57 @@ docker compose -f docker-compose.prod.yml exec api node dist/seed.cjs
 
 ## 7. Тестирование / демонстрация проекта
 
-Принцип тот же, что локально: создаём устройство, узнаём его `deviceId`,
-шлём в него логи, смотрим на дашборде как появляются записи/алерты.
+Принцип тот же, что локально: берём `deviceId`, шлём в него логи,
+смотрим на дашборде как появляются записи/алерты.
 
-### 7.1. Получить deviceId
-- После сида (шаг 5a) устройства уже есть — открой UI или
-  `GET http://<IP_СЕРВЕРА>:5050/devices` (через Swagger).
-- Или создай новое устройство в UI и скопируй его `id`.
+> 🔐 **Важно:** API защищён JWT — все запросы (`/devices`, `/ingest`, `/logs`,
+> `/alerts`) требуют заголовок `Authorization: Bearer <TOKEN>`. Токен берётся
+> логином (`/auth/login`, юзер из сида — `admin/admin123`). Публичны только
+> `/auth/login` и `/auth/register`. Транспорты **syslog** и **MQTT** идут мимо
+> HTTP-guard и токена не требуют.
 
-### 7.2. Способ A — быстрый тест через curl (HTTP ingest)
-Эндпоинт: `POST /ingest/:deviceId/logs`. С любой машины:
+### 7.2. Способ A — готовый демо-скрипт (рекомендуется)
+`for_test/demo.sh` сам логинится, берёт устройство и шлёт всплеск логов
+(имитация SSH brute-force → сработает correlation rule). Прямо на сервере:
 
 ```bash
-curl -X POST http://<IP_СЕРВЕРА>:5050/ingest/<DEVICE_ID>/logs \
+cd ~/diploma-works/Mergen/backend
+BASE=http://localhost:5050 bash for_test/demo.sh
+# или извне:  BASE=http://<IP_СЕРВЕРА>:5050 bash for_test/demo.sh
+```
+
+### 7.2b. Способ A вручную — curl с токеном
+```bash
+BASE=http://<IP_СЕРВЕРА>:5050
+
+# 1) логин -> токен
+TOKEN=$(curl -s -X POST $BASE/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}' \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+
+# 2) узнать deviceId
+curl -s $BASE/devices -H "Authorization: Bearer $TOKEN"
+
+# 3) залить лог
+curl -X POST $BASE/ingest/<DEVICE_ID>/logs \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"level":"ERROR","message":"Failed password for root from 10.0.0.5","source":"HTTP"}'
+
+# 4) посмотреть результат
+curl -s $BASE/devices/<DEVICE_ID>/logs   -H "Authorization: Bearer $TOKEN"
+curl -s $BASE/devices/<DEVICE_ID>/alerts -H "Authorization: Bearer $TOKEN"
 ```
 
-Несколько строк подряд (имитация брутфорса — сработает correlation rule):
-
-```bash
-for i in $(seq 1 15); do
-  curl -s -X POST http://<IP_СЕРВЕРА>:5050/ingest/<DEVICE_ID>/logs \
-    -H "Content-Type: application/json" \
-    -d '{"level":"ERROR","message":"Failed password for admin","source":"HTTP"}';
-done
-```
-
-### 7.3. Способ B — PowerShell-агент (как ты делал у себя)
+### 7.3. Способ B — PowerShell-агент
 Скрипт `for_test/iot-log-agent.ps1` шлёт реальные Windows Event Log на бэк.
-На Windows-машине, с которой показываешь:
+⚠️ Сейчас агент **не отправляет токен**, а HTTP-ingest защищён JWT — по HTTP он
+получит **401**. Чтобы показать через агента, либо демонстрируй через
+syslog/MQTT (способ C), либо допиши в агент заголовок
+`Authorization: Bearer <TOKEN>` в функции `Send-Log`.
 
-```powershell
-.\iot-log-agent.ps1 -DeviceId "<DEVICE_ID>" -ApiUrl "http://<IP_СЕРВЕРА>:5050"
-```
-
-(в `start-agent.bat` поменяй `API_URL` на `http://<IP_СЕРВЕРА>:5050` и `DEVICE_ID`.)
-
-### 7.4. Способ C — syslog / MQTT (живые источники)
+### 7.4. Способ C — syslog / MQTT (живые источники, без токена)
 - **Syslog**: UDP на `<IP_СЕРВЕРА>:5514`
 - **MQTT**: `mqtt://<IP_СЕРВЕРА>:1883`, топик `device/<DEVICE_ID>/logs`
 
