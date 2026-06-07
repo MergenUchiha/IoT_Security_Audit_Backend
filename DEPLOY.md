@@ -47,17 +47,69 @@ docker compose -f docker-compose.prod.yml restart api
 
 База — SQLite в named volume `api_data`, переживает пересборки и перезапуски.
 
+## 5a. Сид демо-данными (опционально)
+
+Заполняет базу фейковыми устройствами, логами, алертами и создаёт
+пользователя **admin / admin123**. Запускается прямо внутри контейнера:
+
+```bash
+docker compose -f docker-compose.prod.yml exec api bun prisma/seed.ts
+```
+
+> ⚠️ Сид сначала **очищает** таблицы (`deleteMany`), затем наполняет заново —
+> не запускай на проде с реальными данными.
+
 ## 6. Проверка
 
 - `http://<IP_СЕРВЕРА>:8090` — фронтенд, зарегистрировать пользователя через UI.
 - `http://<IP_СЕРВЕРА>:5050` — API напрямую (Swagger включён).
 - Логи: `docker compose -f docker-compose.prod.yml logs -f api`
 
-## 7. Подключение IoT-агентов
+## 7. Тестирование / демонстрация проекта
 
-Агенты из `for_test/` шлют логи на сервер:
+Принцип тот же, что локально: создаём устройство, узнаём его `deviceId`,
+шлём в него логи, смотрим на дашборде как появляются записи/алерты.
+
+### 7.1. Получить deviceId
+- После сида (шаг 5a) устройства уже есть — открой UI или
+  `GET http://<IP_СЕРВЕРА>:5050/devices` (через Swagger).
+- Или создай новое устройство в UI и скопируй его `id`.
+
+### 7.2. Способ A — быстрый тест через curl (HTTP ingest)
+Эндпоинт: `POST /ingest/:deviceId/logs`. С любой машины:
+
+```bash
+curl -X POST http://<IP_СЕРВЕРА>:5050/ingest/<DEVICE_ID>/logs \
+  -H "Content-Type: application/json" \
+  -d '{"level":"ERROR","message":"Failed password for root from 10.0.0.5","source":"HTTP"}'
+```
+
+Несколько строк подряд (имитация брутфорса — сработает correlation rule):
+
+```bash
+for i in $(seq 1 15); do
+  curl -s -X POST http://<IP_СЕРВЕРА>:5050/ingest/<DEVICE_ID>/logs \
+    -H "Content-Type: application/json" \
+    -d '{"level":"ERROR","message":"Failed password for admin","source":"HTTP"}';
+done
+```
+
+### 7.3. Способ B — PowerShell-агент (как ты делал у себя)
+Скрипт `for_test/iot-log-agent.ps1` шлёт реальные Windows Event Log на бэк.
+На Windows-машине, с которой показываешь:
+
+```powershell
+.\iot-log-agent.ps1 -DeviceId "<DEVICE_ID>" -ApiUrl "http://<IP_СЕРВЕРА>:5050"
+```
+
+(в `start-agent.bat` поменяй `API_URL` на `http://<IP_СЕРВЕРА>:5050` и `DEVICE_ID`.)
+
+### 7.4. Способ C — syslog / MQTT (живые источники)
 - **Syslog**: UDP на `<IP_СЕРВЕРА>:5514`
-- **MQTT**: `mqtt://<IP_СЕРВЕРА>:1883`, топик `device/+/logs`
+- **MQTT**: `mqtt://<IP_СЕРВЕРА>:1883`, топик `device/<DEVICE_ID>/logs`
+
+После любого из способов открой `http://<IP_СЕРВЕРА>:8090` — логи и алерты
+появляются в реальном времени (SSE).
 
 ## Обновление (после новых пушей в GitHub)
 
