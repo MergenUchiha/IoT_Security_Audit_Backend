@@ -4,15 +4,15 @@
 # их на HTTP ingest API бэкенда в реальном времени.
 # ============================================================
 # Использование:
-#   .\iot-log-agent.ps1 -DeviceId "ВАШ_DEVICE_ID" -ApiUrl "http://localhost:5005"
-#   .\iot-log-agent.ps1 -DeviceId "ВАШ_DEVICE_ID" -ApiUrl "http://192.168.1.X:5005"
+#   .\iot-log-agent.ps1 -DeviceId "ВАШ_DEVICE_ID" -ApiUrl "http://localhost:5001"
+#   .\iot-log-agent.ps1 -DeviceId "ВАШ_DEVICE_ID" -ApiUrl "http://192.168.1.X:5001"
 # ============================================================
 
 param(
     [Parameter(Mandatory=$true)]
     [string]$DeviceId,
 
-    [string]$ApiUrl = "http://localhost:5005",
+    [string]$ApiUrl = "http://localhost:5001",
 
     # Через какие каналы Event Log смотреть
     [string[]]$LogNames = @("System", "Application", "Security"),

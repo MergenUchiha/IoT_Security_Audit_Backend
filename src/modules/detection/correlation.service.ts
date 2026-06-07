@@ -79,8 +79,7 @@ export class CorrelationService {
           type: AlertType.LOG_CORRELATION,
           createdAt: { gte: cooldownFrom },
           data: {
-            path: ['ruleId'],
-            equals: rule.id,
+            string_contains: rule.id,
           },
         },
         orderBy: { createdAt: 'desc' },

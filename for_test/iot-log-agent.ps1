@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$DeviceId,
 
-    [string]$ApiUrl = "http://localhost:5005",
+    [string]$ApiUrl = "http://localhost:5001",
 
     [int]$PollIntervalSec = 3,
 

@@ -11,9 +11,6 @@ import {
   type Device,
 } from '@prisma/client';
 
-import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
-
 let faker: any;
 let bcrypt: any;
 
@@ -30,19 +27,10 @@ async function ensureBcrypt() {
   }
 }
 
-function getDatabaseUrl() {
-  const url = process.env.DATABASE_URL;
-  if (!url || !url.trim()) {
-    throw new Error(
-      'DATABASE_URL is missing. Make sure you have it in .env and that `prisma db seed` loads it.',
-    );
-  }
-  return url;
-}
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 
-// ✅ Prisma Client via Driver Adapter (required in your setup)
-const pool = new Pool({ connectionString: getDatabaseUrl() });
-const adapter = new PrismaPg(pool);
+const dbPath = (process.env.DATABASE_URL ?? 'file:./dev.db').replace('file:', '');
+const adapter = new PrismaBetterSqlite3({ url: dbPath });
 const prisma = new PrismaClient({ adapter });
 
 function pick<T>(arr: readonly T[]): T {
@@ -476,5 +464,4 @@ main()
   })
   .finally(async () => {
     await prisma.$disconnect();
-    await pool.end(); // ✅ закрываем pool
   });

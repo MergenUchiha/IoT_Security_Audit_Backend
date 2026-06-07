@@ -9,7 +9,7 @@ COPY package.json bun.lock ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 RUN bun install --frozen-lockfile \
- && DATABASE_URL="postgresql://fake:fake@localhost:5432/fake" bunx prisma generate
+ && DATABASE_URL="file:/tmp/fake.db" bunx prisma generate
 
 COPY . .
 RUN bun run build
@@ -18,10 +18,10 @@ RUN bun run build
 FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 
-# System deps: nmap + tools for downloading nuclei
+# System deps: nmap + tools for downloading nuclei + build tools for native modules
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-     ca-certificates curl unzip nmap \
+     ca-certificates curl unzip nmap python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
 # ---- install nuclei (pin version via build-arg) ----
@@ -40,12 +40,15 @@ COPY package.json bun.lock ./
 COPY prisma ./prisma
 COPY prisma.config.ts ./
 RUN bun install --frozen-lockfile --production \
- && DATABASE_URL="postgresql://fake:fake@localhost:5432/fake" bunx prisma generate
+ && DATABASE_URL="file:/tmp/fake.db" bunx prisma generate
 
 # Copy dist from builder
 COPY --from=builder /app/dist ./dist
 
+# Ensure SQLite data directory exists
+RUN mkdir -p /app/data
+
 ENV NODE_ENV=production
 EXPOSE 3000
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/src/main.js"]

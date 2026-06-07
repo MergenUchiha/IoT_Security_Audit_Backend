@@ -3,7 +3,7 @@ chcp 65001 >nul
 title IoT Log Agent
 
 set DEVICE_ID=e1c007df-2cdf-48a3-9c77-c5fd270e8e07
-set API_URL=http://localhost:5005
+set API_URL=http://localhost:5001
 
 echo Device ID : %DEVICE_ID%
 echo API URL   : %API_URL%
