@@ -1,0 +1,53 @@
+# ============================================================
+# Production compose: mosquitto + api + web (nginx)
+#
+# Ожидаемая структура на сервере (репозитории рядом):
+#   ~/iot-audit/backend   <- этот репозиторий
+#   ~/iot-audit/frontend  <- IoT_Security_Audit_Frontend
+#
+# Запуск из ~/iot-audit/backend:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# ============================================================
+services:
+  # -------------------- MQTT broker --------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+
+  # -------------------- API (NestJS + SQLite) --------------------
+  api:
+    build:
+      context: .
+      args:
+        NUCLEI_VERSION: "3.2.9"
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    ports:
+      - "5001:3000"      # прямой доступ к API (Swagger), можно убрать — есть прокси через nginx
+      - "5514:5514/udp"  # syslog от IoT-устройств
+    volumes:
+      - api_data:/app/data
+    depends_on:
+      - mosquitto
+
+  # -------------------- Frontend (nginx, проксирует /api/ -> api:3000) --------------------
+  web:
+    build:
+      context: ../frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  api_data:
